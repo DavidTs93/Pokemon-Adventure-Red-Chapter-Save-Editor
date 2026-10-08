@@ -1014,7 +1014,7 @@ function markChanged() {
 }
 
 async function loadGameData() {
-  const game = await fetch("game-data.json").then(response => response.json());
+  const game = await fetch("game-data.json?v=20261008-1").then(response => response.json());
   state.game = game;
   state.itemById = new Map(game.items.map(item => [item.id, item]));
   fillSelect(els.species, Object.values(game.species).filter(entry => entry && !entry.unused).map(entry => [entry.id, `${entry.name} · #${entry.id}`]));
