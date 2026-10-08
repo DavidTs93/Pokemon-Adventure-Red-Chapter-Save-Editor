@@ -10,6 +10,7 @@ const BOX_COUNT = 14;
 const POKEMON_EXPORT_FORMAT = "pokemon-adventure-red-records";
 const POKEMON_EXPORT_VERSION = 1;
 const STATS = ["HP", "Attack", "Defense", "Speed", "Sp. Atk", "Sp. Def"];
+const DISPLAY_STAT_INDICES = [0, 1, 2, 4, 5, 3];
 const NATURES = ["Hardy", "Lonely", "Brave", "Adamant", "Naughty", "Bold", "Docile", "Relaxed", "Impish", "Lax", "Timid", "Hasty", "Serious", "Jolly", "Naive", "Modest", "Mild", "Quiet", "Bashful", "Rash", "Calm", "Gentle", "Sassy", "Careful", "Quirky"];
 const SUBSTRUCT_ORDERS = [
   "GAEM", "GAME", "GEAM", "GEMA", "GMAE", "GMEA",
@@ -33,7 +34,8 @@ const els = {
   dialog: $("#editorDialog"), form: $("#pokemonForm"), editorLocation: $("#editorLocation"), editorTitle: $("#editorTitle"),
   species: $("#speciesField"), nickname: $("#nicknameField"), level: $("#levelField"), nature: $("#natureField"),
   ability: $("#abilityField"), item: $("#itemField"), friendship: $("#friendshipField"), formError: $("#formError"),
-  moves: [...document.querySelectorAll(".move-field")], ivs: $("#ivFields"), evs: $("#evFields"),
+  moves: [...document.querySelectorAll(".move-field")], moveInfos: [...document.querySelectorAll(".move-info")],
+  ivs: $("#ivFields"), evs: $("#evFields"), calculatedStats: $("#calculatedStats"),
   clearPokemon: $("#clearPokemon"), illegalMoves: $("#illegalMovesToggle"), illegalEvs: $("#illegalEvsToggle"),
   hiddenPower: $("#hiddenPowerType"), selectMode: $("#selectMode"), selectionCount: $("#selectionCount"),
   movePanelToggle: $("#movePanelToggle"), editorLayout: $("#editorLayout"), movePanel: $("#movePanel"),
@@ -318,10 +320,19 @@ function initializePokemon(mon, species) {
 }
 
 function recalculatePartyStats(bytes, offset, speciesId, level, ivs, evs, nature) {
+  const calculated = calculatePokemonStats(speciesId, level, ivs, evs, nature);
+  if (!calculated) return;
+  const hp = calculated[0];
+  const oldHp = u16(bytes, offset + 86), oldMax = u16(bytes, offset + 88);
+  w16(bytes, offset + 86, oldMax ? Math.max(1, Math.min(hp, Math.round(oldHp * hp / oldMax))) : hp);
+  [88, 90, 92, 94, 96, 98].forEach((fieldOffset, index) => w16(bytes, offset + fieldOffset, calculated[index]));
+}
+
+function calculatePokemonStats(speciesId, level, ivs, evs, nature) {
   const base = state.game.species[speciesId]?.stats;
-  if (!base) return;
+  if (!base) return null;
   const raw = base.map((stat, index) => Math.floor(((2 * stat + ivs[index] + Math.floor(evs[index] / 4)) * level) / 100));
-  const hp = raw[0] + level + 10;
+  const hp = base[0] === 1 ? 1 : raw[0] + level + 10;
   const up = Math.floor(nature / 5), down = nature % 5;
   const calculated = [hp];
   for (let i = 1; i < 6; i++) {
@@ -333,9 +344,7 @@ function recalculatePartyStats(bytes, offset, speciesId, level, ivs, evs, nature
     }
     calculated.push(value);
   }
-  const oldHp = u16(bytes, offset + 86), oldMax = u16(bytes, offset + 88);
-  w16(bytes, offset + 86, oldMax ? Math.max(1, Math.min(hp, Math.round(oldHp * hp / oldMax))) : hp);
-  [88, 90, 92, 94, 96, 98].forEach((fieldOffset, index) => w16(bytes, offset + fieldOffset, calculated[index]));
+  return calculated;
 }
 
 function compactParty() {
@@ -926,6 +935,49 @@ function legalMovesForSpecies(speciesId) {
   return new Set(state.game.species[speciesId]?.legalMoves || []);
 }
 
+function displayMoveValue(value) {
+  if (value === undefined || value === null || value === "") return "—";
+  return String(value);
+}
+
+function renderMoveInfo(index) {
+  const container = els.moveInfos[index];
+  const moveId = Number(els.moves[index].value || 0);
+  const move = state.game.moves[moveId];
+  container.replaceChildren();
+  if (!move) {
+    container.textContent = "No move selected";
+    return;
+  }
+  const legal = legalMovesForSpecies(Number(els.species.value)).has(moveId);
+  const fields = [
+    ["ID", move.id],
+    ["Type", move.type],
+    ...(move.category ? [["Kind", move.category]] : []),
+    ["Power", move.power === 0 ? "—" : move.power],
+    ["Accuracy", move.accuracy === 0 ? "—" : move.accuracy],
+    ["PP", move.pp]
+  ];
+  fields.forEach(([label, value]) => {
+    const item = document.createElement("span");
+    item.className = "move-info-item";
+    const strong = document.createElement("strong");
+    strong.textContent = `${label}: `;
+    item.append(strong, displayMoveValue(value));
+    container.append(item);
+  });
+  if (!legal) {
+    const warning = document.createElement("span");
+    warning.className = "move-info-item illegal";
+    warning.textContent = "⚠ Illegal for this species";
+    container.append(warning);
+  }
+}
+
+function renderAllMoveInfo() {
+  els.moves.forEach((_, index) => renderMoveInfo(index));
+}
+
 function populateMoveFields(selectedMoves = els.moves.map(field => Number(field.value))) {
   const legal = legalMovesForSpecies(Number(els.species.value));
   const allMoves = Object.values(state.game.moves).filter(Boolean).sort((a, b) => a.name.localeCompare(b.name));
@@ -936,13 +988,42 @@ function populateMoveFields(selectedMoves = els.moves.map(field => Number(field.
     for (const move of allMoves) {
       const isLegal = legal.has(move.id);
       if (!state.allowIllegalMoves && !isLegal && move.id !== selected) continue;
-      const prefix = isLegal ? "" : "⚠ Illegal · ";
-      const option = new Option(`${prefix}${move.name} · #${move.id}`, move.id);
+      const suffix = isLegal ? "" : " · ⚠ Illegal";
+      const option = new Option(`${move.name}${suffix}`, move.id);
       if (!isLegal) option.className = "illegal";
       fragment.append(option);
     }
     field.replaceChildren(fragment);
     field.value = String(selected);
+  });
+  renderAllMoveInfo();
+}
+
+function readStatFields(container, maximum) {
+  const values = Array(6).fill(0);
+  container.querySelectorAll("input").forEach(field => { values[Number(field.dataset.index)] = clamp(field.value, 0, maximum); });
+  return values;
+}
+
+function updateCalculatedStats() {
+  const stats = calculatePokemonStats(
+    Number(els.species.value),
+    clamp(els.level.value, 1, 100),
+    readStatFields(els.ivs, 31),
+    readStatFields(els.evs, 255),
+    Number(els.nature.value)
+  );
+  els.calculatedStats.replaceChildren();
+  if (!stats) return;
+  DISPLAY_STAT_INDICES.forEach(index => {
+    const item = document.createElement("div");
+    item.className = "calculated-stat";
+    const label = document.createElement("span");
+    label.textContent = STATS[index];
+    const value = document.createElement("strong");
+    value.textContent = stats[index];
+    item.append(label, value);
+    els.calculatedStats.append(item);
   });
 }
 
@@ -957,8 +1038,8 @@ function openEditor(mon) {
   els.item.value = String(mon.item || 0);
   els.friendship.value = mon.friendship ?? 70;
   populateMoveFields(mon.moves);
-  [...els.ivs.querySelectorAll("input")].forEach((field, index) => { field.value = mon.ivs[index] ?? 10; });
-  [...els.evs.querySelectorAll("input")].forEach((field, index) => { field.value = mon.evs[index] ?? 0; });
+  els.ivs.querySelectorAll("input").forEach(field => { field.value = mon.ivs[Number(field.dataset.index)] ?? 10; });
+  els.evs.querySelectorAll("input").forEach(field => { field.value = mon.evs[Number(field.dataset.index)] ?? 0; });
   if (mon.evs.reduce((sum, value) => sum + value, 0) > 510) state.allowIllegalEvs = true;
   els.illegalMoves.setAttribute("aria-pressed", String(state.allowIllegalMoves));
   els.illegalEvs.setAttribute("aria-pressed", String(state.allowIllegalEvs));
@@ -966,19 +1047,20 @@ function openEditor(mon) {
   els.illegalEvs.textContent = state.allowIllegalEvs ? "Enforce 510 total EVs" : "Allow more than 510 total EVs";
   updateAbilityOptions(mon.ability);
   updateHiddenPower();
+  updateCalculatedStats();
   els.clearPokemon.disabled = !mon.species;
   els.formError.textContent = "";
   els.dialog.showModal();
 }
 
 function applyEditor() {
-  const evs = [...els.evs.querySelectorAll("input")].map(field => clamp(field.value, 0, 255));
+  const evs = readStatFields(els.evs, 255);
   if (!state.allowIllegalEvs && evs.reduce((sum, value) => sum + value, 0) > 510) { els.formError.textContent = "Combined EVs cannot exceed 510."; return false; }
   const values = {
     species: Number(els.species.value), nickname: els.nickname.value, level: clamp(els.level.value, 1, 100),
     nature: Number(els.nature.value), ability: Number(els.ability.value), item: Number(els.item.value),
     friendship: clamp(els.friendship.value, 0, 255), moves: els.moves.map(field => Number(field.value)),
-    ivs: [...els.ivs.querySelectorAll("input")].map(field => clamp(field.value, 0, 31)), evs
+    ivs: readStatFields(els.ivs, 31), evs
   };
   writePokemon(state.current, values);
   compactParty();
@@ -989,7 +1071,7 @@ function applyEditor() {
 }
 
 function updateHiddenPower() {
-  const ivs = [...els.ivs.querySelectorAll("input")].map(field => clamp(field.value, 0, 31));
+  const ivs = readStatFields(els.ivs, 31);
   const bits = ivs.reduce((sum, value, index) => sum + (value & 1) * (2 ** index), 0);
   const types = ["Fighting", "Flying", "Poison", "Ground", "Rock", "Bug", "Ghost", "Steel", "Fire", "Water", "Grass", "Electric", "Psychic", "Ice", "Dragon", "Dark"];
   els.hiddenPower.textContent = `Hidden Power: ${types[Math.floor(bits * 15 / 63)]}`;
@@ -1014,7 +1096,7 @@ function markChanged() {
 }
 
 async function loadGameData() {
-  const game = await fetch("game-data.json?v=20261008-1").then(response => response.json());
+  const game = await fetch("game-data.json?v=20261008-2").then(response => response.json());
   state.game = game;
   state.itemById = new Map(game.items.map(item => [item.id, item]));
   fillSelect(els.species, Object.values(game.species).filter(entry => entry && !entry.unused).map(entry => [entry.id, `${entry.name} · #${entry.id}`]));
@@ -1026,7 +1108,8 @@ async function loadGameData() {
     const effect = up === down ? "neutral" : `${natureStats[up]} ↑, ${natureStats[down]} ↓`;
     return [index, `${name} (${effect})`];
   }));
-  STATS.forEach((name, index) => {
+  DISPLAY_STAT_INDICES.forEach(index => {
+    const name = STATS[index];
     const ivLabel = document.createElement("label"); ivLabel.textContent = name; ivLabel.innerHTML += `<input type="number" min="0" max="31" data-index="${index}">`; els.ivs.append(ivLabel);
     const evLabel = document.createElement("label"); evLabel.textContent = name; evLabel.innerHTML += `<input type="number" min="0" max="255" data-index="${index}">`; els.evs.append(evLabel);
   });
@@ -1160,7 +1243,7 @@ els.renameForm.addEventListener("submit", event => {
 $("#closeRenameBox").addEventListener("click", () => els.renameDialog.close());
 $("#cancelRenameBox").addEventListener("click", () => els.renameDialog.close());
 els.renameDialog.addEventListener("click", event => { if (event.target === els.renameDialog) els.renameDialog.close(); });
-els.species.addEventListener("change", () => { updateAbilityOptions(0); populateMoveFields(); });
+els.species.addEventListener("change", () => { updateAbilityOptions(0); populateMoveFields(); updateCalculatedStats(); });
 els.form.addEventListener("submit", event => { event.preventDefault(); if (applyEditor()) els.dialog.close(); });
 $("#closeDialog").addEventListener("click", () => els.dialog.close());
 $("#cancelEdit").addEventListener("click", () => els.dialog.close());
@@ -1180,13 +1263,18 @@ els.reportDialog.addEventListener("click", event => { if (event.target === els.r
 els.undo.addEventListener("click", undoLastChange);
 els.reset.addEventListener("click", resetChanges);
 els.dialog.addEventListener("click", event => { if (event.target === els.dialog) els.dialog.close(); });
-els.level.addEventListener("input", () => clampNumericField(els.level, 1, 100));
+els.level.addEventListener("input", () => { clampNumericField(els.level, 1, 100); updateCalculatedStats(); });
+els.nature.addEventListener("change", updateCalculatedStats);
 els.friendship.addEventListener("input", () => clampNumericField(els.friendship, 0, 255));
+els.moves.forEach((field, index) => field.addEventListener("change", () => renderMoveInfo(index)));
 els.ivs.addEventListener("input", event => {
   if (!event.target.matches("input")) return;
-  clampNumericField(event.target, 0, 31); updateHiddenPower();
+  clampNumericField(event.target, 0, 31); updateHiddenPower(); updateCalculatedStats();
 });
-els.evs.addEventListener("input", event => { if (event.target.matches("input")) enforceEvLimit(event.target); });
+els.evs.addEventListener("input", event => {
+  if (!event.target.matches("input")) return;
+  enforceEvLimit(event.target); updateCalculatedStats();
+});
 els.illegalMoves.addEventListener("click", () => {
   state.allowIllegalMoves = !state.allowIllegalMoves;
   els.illegalMoves.setAttribute("aria-pressed", String(state.allowIllegalMoves));
@@ -1204,6 +1292,7 @@ els.illegalEvs.addEventListener("click", () => {
       field.value = String(value); remaining -= value;
     });
   }
+  updateCalculatedStats();
 });
 els.selectMode.addEventListener("click", () => {
   state.selectMode = !state.selectMode;

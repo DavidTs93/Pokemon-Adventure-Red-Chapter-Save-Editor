@@ -6,7 +6,7 @@
   <meta name="color-scheme" content="dark">
   <link rel="icon" href="data:,">
   <title>Adventure Red Save Editor</title>
-  <link rel="stylesheet" href="style.css?v=20261008-1">
+  <link rel="stylesheet" href="style.css?v=20261008-2">
 </head>
 <body>
   <header>
@@ -122,11 +122,16 @@
         <legend>Moves</legend>
         <button id="illegalMovesToggle" class="compact-toggle" type="button" aria-pressed="false">Allow illegal moves</button>
         <div class="form-grid moves-grid">
-          <label>Move 1<select class="move-field"></select></label>
-          <label>Move 2<select class="move-field"></select></label>
-          <label>Move 3<select class="move-field"></select></label>
-          <label>Move 4<select class="move-field"></select></label>
+          <div class="move-editor"><label>Move 1<select class="move-field"></select></label><div class="move-info"></div></div>
+          <div class="move-editor"><label>Move 2<select class="move-field"></select></label><div class="move-info"></div></div>
+          <div class="move-editor"><label>Move 3<select class="move-field"></select></label><div class="move-info"></div></div>
+          <div class="move-editor"><label>Move 4<select class="move-field"></select></label><div class="move-info"></div></div>
         </div>
+      </fieldset>
+
+      <fieldset>
+        <legend>Stats</legend>
+        <div id="calculatedStats" class="calculated-stats" aria-live="polite"></div>
       </fieldset>
 
       <div class="stat-columns">
@@ -193,6 +198,6 @@
     <button type="button" data-action="remove" class="danger">Remove</button>
   </menu>
 
-  <script src="app.js?v=20261008-1"></script>
+  <script src="app.js?v=20261008-2"></script>
 </body>
 </html>
