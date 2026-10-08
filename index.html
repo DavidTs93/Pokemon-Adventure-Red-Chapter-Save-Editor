@@ -1,0 +1,198 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <link rel="icon" href="data:,">
+  <title>Adventure Red Save Editor</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <div>
+      <p class="eyebrow">Pokémon Adventure Red Chapter</p>
+      <h1>Save Editor</h1>
+    </div>
+    <div class="header-actions">
+      <button id="undoButton" disabled>Undo</button>
+      <button id="resetButton" class="danger" disabled>Reset</button>
+      <button id="downloadButton" class="primary" disabled>Download edited save</button>
+    </div>
+  </header>
+
+  <main>
+    <section id="loader" class="loader card">
+      <div class="upload-mark">SAV</div>
+      <h2>Open a save file</h2>
+      <p>Select a 128 KiB Adventure Red <code>.sav</code> file. Processing stays entirely in this browser. Keep an untouched backup of your original save.</p>
+      <label class="file-button">Choose save<input id="saveInput" type="file" accept=".sav,.srm,.sa1,application/octet-stream"></label>
+      <p id="loadError" class="error" role="alert"></p>
+    </section>
+
+    <section id="workspace" hidden>
+      <div class="save-summary card">
+        <div><span>File</span><strong id="fileName">—</strong></div>
+        <div><span>Trainer</span><strong id="trainerName">—</strong></div>
+        <div><span>Active save</span><strong id="saveSlot">—</strong></div>
+        <div><span>Changes</span><strong id="changeCount">0</strong></div>
+      </div>
+
+      <div class="editor-controls">
+        <nav class="tabs" aria-label="Editor sections">
+          <button class="tab active" data-view="party">Party</button>
+          <button class="tab" data-view="boxes">PC Boxes</button>
+        </nav>
+        <div class="slot-tools">
+          <button id="selectMode" type="button" aria-pressed="false">Select</button>
+          <strong id="selectionCount">0 selected</strong>
+          <button id="exportSelected" type="button" disabled>Export selected</button>
+          <label class="button-label">Import Pokémon<input id="pokemonImportInput" type="file" accept=".arpokemon,.json,application/json"></label>
+          <button id="movePanelToggle" type="button">Open move panel</button>
+        </div>
+        <span id="actionStatus" role="status"></span>
+      </div>
+
+      <div id="editorLayout" class="editor-layout">
+        <div id="primaryPane">
+          <section id="partyView" class="view">
+            <div class="section-heading">
+              <div><p class="eyebrow">Current team</p><h2>Party</h2></div>
+              <p>Select a slot to edit its Pokémon.</p>
+            </div>
+            <div id="partyGrid" class="party-grid"></div>
+          </section>
+
+          <section id="boxesView" class="view" hidden>
+            <div class="section-heading box-heading">
+              <div><p class="eyebrow">Pokémon Storage System</p><h2>PC Boxes</h2></div>
+              <div class="box-picker">
+                <label>Box <select id="boxSelect"></select></label>
+                <button id="renameBoxButton" type="button">Rename box</button>
+              </div>
+            </div>
+            <div class="box-search card">
+              <label>Search every PC box
+                <input id="boxSearch" type="search" placeholder="Species, nickname, move, item, ability…" autocomplete="off">
+              </label>
+              <button id="clearBoxSearch" type="button" disabled>Clear</button>
+            </div>
+            <section id="boxSearchPanel" class="search-panel" hidden>
+              <div class="search-heading"><h3>Search results</h3><strong id="boxSearchCount"></strong></div>
+              <div id="boxSearchResults" class="box-grid search-grid"></div>
+            </section>
+            <div id="boxGrid" class="box-grid"></div>
+          </section>
+        </div>
+
+        <aside id="movePanel" class="move-panel card" hidden>
+          <div class="section-heading box-heading">
+            <div><p class="eyebrow">Drag-and-drop destination</p><h2>PC Box</h2></div>
+            <button id="closeMovePanel" type="button" class="icon-button" aria-label="Close move panel">×</button>
+          </div>
+          <div class="box-picker move-box-picker">
+            <label>Box <select id="moveBoxSelect"></select></label>
+            <button id="renameMoveBoxButton" type="button">Rename box</button>
+          </div>
+          <div id="moveBoxGrid" class="box-grid move-box-grid"></div>
+          <p class="field-note">Drag Pokémon between the two panes. On touch screens, select Pokémon and long-press a target slot.</p>
+        </aside>
+      </div>
+    </section>
+  </main>
+
+  <dialog id="editorDialog">
+    <form id="pokemonForm" method="dialog">
+      <div class="dialog-heading">
+        <div><p id="editorLocation" class="eyebrow"></p><h2 id="editorTitle">Edit Pokémon</h2></div>
+        <button type="button" id="closeDialog" class="icon-button" aria-label="Close">×</button>
+      </div>
+
+      <div class="form-grid">
+        <label class="wide">Species<select id="speciesField"></select></label>
+        <label>Nickname<input id="nicknameField" maxlength="10" placeholder="No nickname"></label>
+        <label>Level<input id="levelField" type="number" min="1" max="100"></label>
+        <label>Nature<select id="natureField"></select></label>
+        <label>Ability<select id="abilityField"></select></label>
+        <label>Held item<select id="itemField"></select></label>
+        <label>Friendship<input id="friendshipField" type="number" min="0" max="255"></label>
+      </div>
+
+      <fieldset>
+        <legend>Moves</legend>
+        <button id="illegalMovesToggle" class="compact-toggle" type="button" aria-pressed="false">Allow illegal moves</button>
+        <div class="form-grid moves-grid">
+          <label>Move 1<select class="move-field"></select></label>
+          <label>Move 2<select class="move-field"></select></label>
+          <label>Move 3<select class="move-field"></select></label>
+          <label>Move 4<select class="move-field"></select></label>
+        </div>
+      </fieldset>
+
+      <div class="stat-columns">
+        <fieldset>
+          <legend>IVs</legend>
+          <div id="ivFields" class="stats-grid"></div>
+          <p id="hiddenPowerType" class="field-note">Hidden Power: —</p>
+        </fieldset>
+        <fieldset>
+          <legend>EVs</legend>
+          <div id="evFields" class="stats-grid"></div>
+          <p class="field-note">Maximum combined EVs: 510.</p>
+          <button id="illegalEvsToggle" class="compact-toggle" type="button" aria-pressed="false">Allow more than 510 total EVs</button>
+        </fieldset>
+      </div>
+
+      <p id="formError" class="error" role="alert"></p>
+      <div class="dialog-actions">
+        <button type="button" id="clearPokemon" class="danger">Clear slot</button>
+        <span></span>
+        <button type="button" id="cancelEdit">Cancel</button>
+        <button type="submit" class="primary">Apply changes</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="renameBoxDialog" class="small-dialog">
+    <form id="renameBoxForm" method="dialog">
+      <div class="dialog-heading">
+        <div><p class="eyebrow">Pokémon Storage System</p><h2>Rename box</h2></div>
+        <button type="button" id="closeRenameBox" class="icon-button" aria-label="Close">×</button>
+      </div>
+      <label>Box name<input id="boxNameField" maxlength="8" required></label>
+      <p class="field-note">Box names can contain up to 8 characters.</p>
+      <div class="simple-dialog-actions">
+        <button type="button" id="cancelRenameBox">Cancel</button>
+        <button type="submit" class="primary">Rename</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="reportDialog" class="report-dialog">
+    <div class="report-content">
+      <div class="dialog-heading">
+        <div><p class="eyebrow">Pre-download check</p><h2>Legality and corruption report</h2></div>
+        <button type="button" id="closeReport" class="icon-button" aria-label="Close">×</button>
+      </div>
+      <div id="reportSummary" class="report-summary"></div>
+      <div id="reportDetails" class="report-details"></div>
+      <div class="simple-dialog-actions">
+        <button type="button" id="cancelDownload">Cancel</button>
+        <button type="button" id="confirmDownload" class="primary">Download save</button>
+      </div>
+    </div>
+  </dialog>
+
+  <menu id="pokemonMenu" class="context-menu" hidden>
+    <button type="button" data-action="edit">Edit</button>
+    <button type="button" data-action="copy">Copy</button>
+    <button type="button" data-action="export">Export</button>
+    <button type="button" data-action="paste">Paste here</button>
+    <button type="button" data-action="import">Import here…</button>
+    <button type="button" data-action="move">Move selected here</button>
+    <button type="button" data-action="remove" class="danger">Remove</button>
+  </menu>
+
+  <script src="app.js"></script>
+</body>
+</html>
